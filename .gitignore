@@ -1,5 +1,7 @@
 ## Gradle:
 .gradle/
+gradle-*/
+gradle-*-bin.zip
 gradle-app.setting
 /build/
 /android/build/
