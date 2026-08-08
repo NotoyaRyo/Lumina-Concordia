@@ -1,0 +1,9 @@
+LUMINA_MAP_V1
+id=official-map
+name=公式マップ
+official=true
+sourceType=GENERATED_SEED
+seed=20260807
+rows=38
+mapColsEven=58
+mapColsOdd=58
