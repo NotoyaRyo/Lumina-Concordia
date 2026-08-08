@@ -51,13 +51,14 @@ public final class MapRepository {
         String stamp = FILE_TIMESTAMP.format(now);
         String mapId = "custom-map-" + stamp;
         String displayName = "カスタムマップ " + DISPLAY_TIMESTAMP.format(now);
-        MapDefinition definition = model.createTileSnapshotDefinition(mapId, displayName, false);
-        FileHandle directory = Gdx.files.local(CUSTOM_MAP_DIRECTORY);
-        if (!directory.exists()) {
-            directory.mkdirs();
+        return saveCustomMapSnapshot(model, mapId, displayName);
+    }
+
+    public static MapDefinition overwriteCustomMap(HexMapModel model, MapDefinition baseMap) {
+        if (baseMap == null || baseMap.isOfficial()) {
+            throw new IllegalArgumentException("Only custom maps can be overwritten.");
         }
-        writeDefinition(directory.child(mapId + CUSTOM_MAP_EXTENSION), definition);
-        return definition;
+        return saveCustomMapSnapshot(model, baseMap.getId(), baseMap.getDisplayName());
     }
 
     public static void writeDefinition(FileHandle file, MapDefinition definition) {
@@ -81,6 +82,16 @@ public final class MapRepository {
                     .append('\n');
         }
         file.writeString(builder.toString(), false, StandardCharsets.UTF_8.name());
+    }
+
+    private static MapDefinition saveCustomMapSnapshot(HexMapModel model, String mapId, String displayName) {
+        MapDefinition definition = model.createTileSnapshotDefinition(mapId, displayName, false);
+        FileHandle directory = Gdx.files.local(CUSTOM_MAP_DIRECTORY);
+        if (!directory.exists()) {
+            directory.mkdirs();
+        }
+        writeDefinition(directory.child(mapId + CUSTOM_MAP_EXTENSION), definition);
+        return definition;
     }
 
     public static MapDefinition readDefinition(FileHandle file, boolean defaultOfficial) {

@@ -89,6 +89,7 @@ public class LuminaGame extends ApplicationAdapter {
     private Rectangle[] terrainButtons;
     private Rectangle[] factionButtons;
     private Rectangle saveMapButton;
+    private Rectangle overwriteMapButton;
     private float editorScrollOffset = 0f;
     private float editorScrollMax = 0f;
     private float editorListViewportTop = 0f;
@@ -121,6 +122,8 @@ public class LuminaGame extends ApplicationAdapter {
     private int selectedR = Integer.MIN_VALUE;
     private Faction selectedFaction;
     private int activeSaveSlot = -1;
+    private int lastEditorPaintQ = Integer.MIN_VALUE;
+    private int lastEditorPaintR = Integer.MIN_VALUE;
     private int prevMiddleX = -1;
     private int prevMiddleY = -1;
 
@@ -185,6 +188,30 @@ public class LuminaGame extends ApplicationAdapter {
                     return handleMenuClick(screenX, uiY);
                 }
                 return handleGameClick(screenX, screenY, uiY);
+            }
+
+            @Override
+            public boolean touchDragged(int screenX, int screenY, int pointer) {
+                if (screenMode != ScreenMode.GAME || gameMode != GameMode.MAP_EDITOR || pauseMenuVisible) {
+                    return false;
+                }
+                if (!Gdx.input.isButtonPressed(Input.Buttons.LEFT)) {
+                    return false;
+                }
+                float uiY = Gdx.graphics.getHeight() - screenY;
+                if (editorPanelRect != null && editorPanelRect.contains(screenX, uiY)) {
+                    return false;
+                }
+                return applyEditorAtScreenCoordinate(screenX, screenY, true);
+            }
+
+            @Override
+            public boolean touchUp(int screenX, int screenY, int pointer, int button) {
+                if (button == Input.Buttons.LEFT) {
+                    lastEditorPaintQ = Integer.MIN_VALUE;
+                    lastEditorPaintR = Integer.MIN_VALUE;
+                }
+                return false;
             }
         });
     }
@@ -265,8 +292,9 @@ public class LuminaGame extends ApplicationAdapter {
         }
 
         saveMapButton = new Rectangle(innerX, editorPanelRect.y + EDITOR_PANEL_MARGIN, innerWidth, EDITOR_SAVE_BUTTON_HEIGHT);
+        overwriteMapButton = new Rectangle(innerX, saveMapButton.y + saveMapButton.height + 8f, innerWidth, EDITOR_SAVE_BUTTON_HEIGHT - 6f);
         editorListViewportTop = toolY - 10f;
-        editorListViewportBottom = saveMapButton.y + saveMapButton.height + 16f;
+        editorListViewportBottom = overwriteMapButton.y + overwriteMapButton.height + 16f;
 
         terrainButtons = new Rectangle[TerrainType.values().length];
         float terrainWidth = (innerWidth - 10f) / 2f;
@@ -482,6 +510,10 @@ public class LuminaGame extends ApplicationAdapter {
             return true;
         }
 
+        if (gameMode == GameMode.MAP_EDITOR) {
+            return applyEditorAtScreenCoordinate(screenX, screenY, false);
+        }
+
         Vector3 world = new Vector3(screenX, screenY, 0);
         camera.unproject(world);
         world.x = hexMapModel.wrapWorldX(world.x);
@@ -496,18 +528,38 @@ public class LuminaGame extends ApplicationAdapter {
 
         selectedQ = tile.q;
         selectedR = tile.r;
-
-        if (gameMode == GameMode.MAP_EDITOR) {
-            applyEditorToTile(tile);
+        if (tile.faction != null && tile.faction == selectedFaction) {
+            selectedFaction = null;
+            selectedQ = Integer.MIN_VALUE;
+            selectedR = Integer.MIN_VALUE;
         } else {
-            if (tile.faction != null && tile.faction == selectedFaction) {
-                selectedFaction = null;
+            selectedFaction = tile.faction;
+        }
+        return true;
+    }
+
+    private boolean applyEditorAtScreenCoordinate(int screenX, int screenY, boolean fromDrag) {
+        Vector3 world = new Vector3(screenX, screenY, 0);
+        camera.unproject(world);
+        world.x = hexMapModel.wrapWorldX(world.x);
+        int[] rounded = hexMapModel.worldToAxialRounded(world.x, world.y);
+        HexMapModel.Tile tile = hexMapModel.findTile(rounded[0], rounded[1]);
+        if (tile == null) {
+            if (!fromDrag) {
                 selectedQ = Integer.MIN_VALUE;
                 selectedR = Integer.MIN_VALUE;
-            } else {
-                selectedFaction = tile.faction;
+                selectedFaction = null;
             }
+            return false;
         }
+        if (fromDrag && tile.q == lastEditorPaintQ && tile.r == lastEditorPaintR) {
+            return true;
+        }
+        selectedQ = tile.q;
+        selectedR = tile.r;
+        applyEditorToTile(tile, fromDrag);
+        lastEditorPaintQ = tile.q;
+        lastEditorPaintR = tile.r;
         return true;
     }
 
@@ -575,10 +627,20 @@ public class LuminaGame extends ApplicationAdapter {
             return true;
         }
 
+        if (overwriteMapButton != null && overwriteMapButton.contains(screenX, uiY)) {
+            if (!canOverwriteCurrentMap()) {
+                menuMessage = "上書き対象のカスタムマップを開いてください。";
+                return true;
+            }
+            currentMapDefinition = MapRepository.overwriteCustomMap(hexMapModel, currentMapDefinition);
+            menuMessage = "カスタムマップを上書き保存しました: " + currentMapDefinition.getDisplayName();
+            return true;
+        }
+
         return true;
     }
 
-    private void applyEditorToTile(HexMapModel.Tile tile) {
+    private void applyEditorToTile(HexMapModel.Tile tile, boolean fromDrag) {
         if (editorTool == EditorTool.TERRAIN) {
             tile.terrain = editorTerrainBrush;
             if (tile.terrain == TerrainType.WATER || tile.terrain.isPolar()) {
@@ -589,6 +651,12 @@ public class LuminaGame extends ApplicationAdapter {
         } else if (editorTool == EditorTool.FACTION) {
             if (tile.terrain == TerrainType.WATER || tile.terrain.isPolar()) {
                 menuMessage = "水域または極地には領土を設定できません。";
+                return;
+            }
+            if (!fromDrag && tile.faction != null && tile.faction != editorFactionBrush) {
+                editorFactionBrush = tile.faction;
+                menuMessage = "領土ブラシを選択: " + editorFactionBrush.getLabel();
+                selectedFaction = tile.faction;
                 return;
             }
             tile.faction = editorFactionBrush;
@@ -613,6 +681,13 @@ public class LuminaGame extends ApplicationAdapter {
             }
         }
         selectedFaction = tile.faction;
+    }
+
+    private boolean canOverwriteCurrentMap() {
+        return currentMapDefinition != null
+                && !currentMapDefinition.isOfficial()
+                && currentMapDefinition.getId() != null
+                && currentMapDefinition.getId().startsWith("custom-map-");
     }
 
     private void clearFactionCapital(Faction faction) {
@@ -1029,6 +1104,8 @@ public class LuminaGame extends ApplicationAdapter {
 
         shapeRenderer.setColor(0.22f, 0.42f, 0.30f, 1f);
         shapeRenderer.rect(saveMapButton.x, saveMapButton.y, saveMapButton.width, saveMapButton.height);
+        shapeRenderer.setColor(canOverwriteCurrentMap() ? 0.36f : 0.26f, 0.34f, 0.28f, 1f);
+        shapeRenderer.rect(overwriteMapButton.x, overwriteMapButton.y, overwriteMapButton.width, overwriteMapButton.height);
     }
 
     private void renderEditorPanelText() {
@@ -1066,8 +1143,9 @@ public class LuminaGame extends ApplicationAdapter {
         }
 
         menuFont.draw(spriteBatch, "マップ保存", saveMapButton.x + 10f, saveMapButton.y + 31f);
+        menuFont.draw(spriteBatch, "上書き保存", overwriteMapButton.x + 10f, overwriteMapButton.y + 28f);
         if (editorScrollMax > 0f) {
-            menuFont.draw(spriteBatch, "ホイールでスクロール", editorPanelRect.x + 14f, saveMapButton.y + saveMapButton.height + 14f);
+            menuFont.draw(spriteBatch, "ホイールでスクロール", editorPanelRect.x + 14f, overwriteMapButton.y + overwriteMapButton.height + 14f);
         }
     }
 
