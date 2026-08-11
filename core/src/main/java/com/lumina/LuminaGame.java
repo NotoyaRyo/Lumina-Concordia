@@ -32,15 +32,15 @@ import java.util.List;
 import java.util.Set;
 import java.util.concurrent.ThreadLocalRandom;
 
-public class LuminaGame extends ApplicationAdapter {
-    private enum ScreenMode { MENU, GAME }
-    private enum MenuState { MAIN, SETTINGS, MAP_SELECT, LOAD_SELECT, AUTO_GENERATE, OPTIONS }
-    private enum GameMode { PLAY, MAP_EDITOR }
-    private enum EditorTool { TERRAIN, FACTION, CAPITAL }
-    private enum EditorAccordionSection { CITY, TERRAIN, FACTION }
-    private enum SaveSelectionAction { LOAD_GAME, SAVE_GAME }
-    private enum TurnPhase { PLAYER_FACTION_SELECT, PLAYER_TURN, AI_TURN }
-    private enum PendingEditorExitAction { NONE, RETURN_TO_MENU }
+public class LuminaGame extends ApplicationAdapter implements com.lumina.editor.MapEditorController.MapEditorHost {
+    public enum ScreenMode { MENU, GAME }
+    public enum MenuState { MAIN, SETTINGS, MAP_SELECT, LOAD_SELECT, AUTO_GENERATE, OPTIONS }
+    public enum GameMode { PLAY, MAP_EDITOR }
+    public enum EditorTool { TERRAIN, FACTION, CAPITAL }
+    public enum EditorAccordionSection { CITY, TERRAIN, FACTION }
+    public enum SaveSelectionAction { LOAD_GAME, SAVE_GAME }
+    public enum TurnPhase { PLAYER_FACTION_SELECT, PLAYER_TURN, AI_TURN }
+    public enum PendingEditorExitAction { NONE, RETURN_TO_MENU }
 
     private static final float TOP_MENU_HEIGHT = 52f;
     private static final float HAMBURGER_SIZE = 36f;
@@ -151,6 +151,7 @@ public class LuminaGame extends ApplicationAdapter {
     private HexMapModel hexMapModel;
     private HexMapRenderer hexMapRenderer;
     private HexMapConfig hexMapConfig;
+    private com.lumina.editor.MapEditorController mapEditorController;
     private MapDefinition currentMapDefinition;
     private MapDefinition generatedPreviewMapDefinition;
     private Preferences preferences;
@@ -213,6 +214,7 @@ public class LuminaGame extends ApplicationAdapter {
         loadBackgroundTexture();
         loadInitialMap();
         hexMapRenderer = new HexMapRenderer(hexMapModel, hexMapConfig, backgroundTexture);
+        mapEditorController = new com.lumina.editor.MapEditorController(this);
 
         updateMenuLayout(Gdx.graphics.getWidth(), Gdx.graphics.getHeight());
         setMenuState(MenuState.MAIN);
@@ -313,7 +315,7 @@ public class LuminaGame extends ApplicationAdapter {
                 if (editorPanelRect != null && editorPanelRect.contains(screenX, uiY)) {
                     return false;
                 }
-                return applyEditorAtScreenCoordinate(screenX, screenY, true, erase);
+                return mapEditorController.applyEditorAtScreenCoordinate(screenX, screenY, true, erase);
             }
 
             @Override
@@ -393,7 +395,7 @@ public class LuminaGame extends ApplicationAdapter {
         rebuildFactionSelectionButtons(width, height);
     }
 
-    private void updateEditorLayout(int width, int height) {
+    public void updateEditorLayout(int width, int height) {
         float panelHeight = height - TOP_MENU_HEIGHT - EDITOR_PANEL_MARGIN * 2f;
         editorPanelRect = new Rectangle(width - EDITOR_PANEL_WIDTH - EDITOR_PANEL_MARGIN,
                 EDITOR_PANEL_MARGIN,
@@ -509,7 +511,7 @@ public class LuminaGame extends ApplicationAdapter {
         }
     }
 
-    private void rebuildCitySelectionButtons(float innerX, float innerWidth, float topY) {
+    public void rebuildCitySelectionButtons(float innerX, float innerWidth, float topY) {
         Faction targetFaction = editorTool == EditorTool.FACTION
                 ? editorFactionBrush
                 : (selectedFaction != null ? selectedFaction : editorFactionBrush);
@@ -537,7 +539,7 @@ public class LuminaGame extends ApplicationAdapter {
         for (int i = 0; i < cityTiles.size(); i++) {
             HexMapModel.Tile tile = cityTiles.get(i);
             String label = tile.capital ? "★首都" : "都市";
-            label += " #" + tile.cityId + " " + cityDisplayName(tile);
+            label += " #" + tile.cityId + " " + mapEditorController.cityDisplayName(tile);
             citySelectButtons[i] = new Rectangle(innerX, 0f, innerWidth, buttonHeight);
             citySelectIds[i] = tile.cityId;
             citySelectLabels[i] = label;
@@ -545,7 +547,7 @@ public class LuminaGame extends ApplicationAdapter {
         relayoutEditorScrollableContent();
     }
 
-    private void setExpandedEditorSection(EditorAccordionSection section) {
+    public void setExpandedEditorSection(EditorAccordionSection section) {
         if (expandedEditorSection == section) {
             expandedEditorSection = null;
         } else {
@@ -554,18 +556,22 @@ public class LuminaGame extends ApplicationAdapter {
         relayoutEditorScrollableContent();
     }
 
-    private void openEditorSection(EditorAccordionSection section) {
+    public void setEditorSectionExpanded(EditorAccordionSection section) {
+        setExpandedEditorSection(section);
+    }
+
+    public void openEditorSection(EditorAccordionSection section) {
         if (expandedEditorSection != section) {
             expandedEditorSection = section;
             relayoutEditorScrollableContent();
         }
     }
 
-    private boolean isEditorSectionExpanded(EditorAccordionSection section) {
+    public boolean isEditorSectionExpanded(EditorAccordionSection section) {
         return expandedEditorSection == section;
     }
 
-    private float layoutEditorSections(float innerX, float innerWidth, float terrainWidth, float startY, boolean applyLayout) {
+    public float layoutEditorSections(float innerX, float innerWidth, float terrainWidth, float startY, boolean applyLayout) {
         float contentCursorY = startY;
 
         if (applyLayout) {
@@ -995,12 +1001,13 @@ public class LuminaGame extends ApplicationAdapter {
             }
         }
 
-        if (button == Input.Buttons.LEFT && gameMode == GameMode.MAP_EDITOR && handleEditorUiClick(screenX, uiY)) {
+        if (button == Input.Buttons.LEFT && gameMode == GameMode.MAP_EDITOR && mapEditorController != null
+                && mapEditorController.handleEditorUiClick(screenX, uiY)) {
             return true;
         }
 
         if (gameMode == GameMode.MAP_EDITOR) {
-            return applyEditorAtScreenCoordinate(screenX, screenY, false, button == Input.Buttons.RIGHT);
+            return mapEditorController.applyEditorAtScreenCoordinate(screenX, screenY, false, button == Input.Buttons.RIGHT);
         }
 
         if (button != Input.Buttons.LEFT) {
@@ -1069,82 +1076,6 @@ public class LuminaGame extends ApplicationAdapter {
             }
         }
         return false;
-    }
-
-    private boolean applyEditorAtScreenCoordinate(int screenX, int screenY, boolean fromDrag, boolean erase) {
-        Vector3 world = new Vector3(screenX, screenY, 0);
-        camera.unproject(world);
-        world.x = hexMapModel.wrapWorldX(world.x);
-        int[] rounded = hexMapModel.worldToAxialRounded(world.x, world.y);
-        HexMapModel.Tile tile = hexMapModel.findTile(rounded[0], rounded[1]);
-        if (tile == null) {
-            if (!fromDrag) {
-                selectedQ = Integer.MIN_VALUE;
-                selectedR = Integer.MIN_VALUE;
-                selectedFaction = null;
-            }
-            return false;
-        }
-        if (fromDrag && tile.q == lastEditorPaintQ && tile.r == lastEditorPaintR) {
-            return true;
-        }
-        selectedQ = tile.q;
-        selectedR = tile.r;
-        if (erase) {
-            clearEditorCityArea(tile);
-        } else {
-            applyEditorToTile(tile, fromDrag);
-        }
-        lastEditorPaintQ = tile.q;
-        lastEditorPaintR = tile.r;
-        return true;
-    }
-
-    private void clearEditorCityArea(HexMapModel.Tile tile) {
-        if (tile == null || tile.terrain.isPolar()) {
-            menuMessage = "このタイルの都市圏は解除できません。";
-            return;
-        }
-        if (tile.faction == null || tile.cityId < 0) {
-            menuMessage = "解除できる都市圏がありません。";
-            return;
-        }
-
-        Faction ownerFaction = tile.faction;
-        int removedCityId = tile.cityId;
-        if (tile.cityCenter) {
-            for (HexMapModel.Tile other : hexMapModel.getTiles()) {
-                if (other.cityId == removedCityId) {
-                    other.faction = null;
-                    other.capital = false;
-                    other.cityCenter = false;
-                    other.cityId = -1;
-                }
-            }
-            if (selectedCityId == removedCityId) {
-                selectedCityId = -1;
-            }
-            selectedFaction = ownerFaction;
-            editorFactionBrush = ownerFaction;
-            rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                    editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                    editorToolButtons[0].y);
-            editorHasUnsavedChanges = true;
-            menuMessage = "都市と都市圏を解除: " + ownerFaction.getLabel();
-            return;
-        }
-
-        tile.faction = null;
-        tile.capital = false;
-        tile.cityCenter = false;
-        tile.cityId = -1;
-        selectedFaction = ownerFaction;
-        editorFactionBrush = ownerFaction;
-        rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                editorToolButtons[0].y);
-        editorHasUnsavedChanges = true;
-        menuMessage = "都市圏を解除: " + ownerFaction.getLabel();
     }
 
     private void handlePauseMenuSelection(int index) {
@@ -1406,366 +1337,7 @@ public class LuminaGame extends ApplicationAdapter {
         return (dq + dr + ds) / 2;
     }
 
-    private boolean handleEditorUiClick(float screenX, float uiY) {
-        if (editorPanelRect == null || !editorPanelRect.contains(screenX, uiY)) {
-            return false;
-        }
-
-        for (int i = 0; i < editorToolButtons.length; i++) {
-            if (editorToolButtons[i].contains(screenX, uiY)) {
-                editorTool = EditorTool.values()[i];
-                if (editorTool == EditorTool.TERRAIN) {
-                    openEditorSection(EditorAccordionSection.TERRAIN);
-                } else if (editorTool == EditorTool.FACTION) {
-                    openEditorSection(EditorAccordionSection.FACTION);
-                } else {
-                    openEditorSection(EditorAccordionSection.CITY);
-                }
-                menuMessage = "";
-                return true;
-            }
-        }
-
-        if (editorFactionBadgeRect != null && editorFactionBadgeRect.contains(screenX, uiY)) {
-            if (editorFactionBrush == null) {
-                menuMessage = "国家ブラシが未選択です。";
-                return true;
-            }
-            editorTool = EditorTool.FACTION;
-            selectedFaction = editorFactionBrush;
-            selectedCityId = -1;
-            openEditorSection(EditorAccordionSection.FACTION);
-            rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                    editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                    editorToolButtons[0].y);
-            menuMessage = "国家ブラシを再選択: " + editorFactionBrush.getLabel();
-            return true;
-        }
-
-        if (citySectionHeaderRect != null && citySectionHeaderRect.contains(screenX, uiY)) {
-            setExpandedEditorSection(EditorAccordionSection.CITY);
-            return true;
-        }
-        if (terrainSectionHeaderRect != null && terrainSectionHeaderRect.contains(screenX, uiY)) {
-            setExpandedEditorSection(EditorAccordionSection.TERRAIN);
-            return true;
-        }
-        if (factionSectionHeaderRect != null && factionSectionHeaderRect.contains(screenX, uiY)) {
-            setExpandedEditorSection(EditorAccordionSection.FACTION);
-            return true;
-        }
-
-        if (editorCityNameButtonRect != null && editorCityNameButtonRect.contains(screenX, uiY)) {
-            if (selectedCityId < 0) {
-                menuMessage = "先に都市を選択してください。";
-                return true;
-            }
-            if (editorCityNameEditing) {
-                commitEditorCityName();
-            } else {
-                startEditorCityNameEditing(selectedCityId);
-            }
-            return true;
-        }
-
-        if (editorCityNameRect != null && editorCityNameRect.contains(screenX, uiY)) {
-            if (selectedCityId < 0) {
-                menuMessage = "先に都市を選択してください。";
-                return true;
-            }
-            startEditorCityNameEditing(selectedCityId);
-            return true;
-        }
-
-        if (isEditorSectionExpanded(EditorAccordionSection.CITY) && citySelectButtons != null) {
-            for (int i = 0; i < citySelectButtons.length; i++) {
-                if (citySelectButtons[i] != null && citySelectButtons[i].contains(screenX, uiY)) {
-                    cancelEditorCityNameEditing();
-                    selectedCityId = citySelectIds[i];
-                    for (HexMapModel.Tile tile : hexMapModel.getTiles()) {
-                        if (tile.cityCenter && tile.cityId == selectedCityId) {
-                            editorTool = EditorTool.FACTION;
-                            selectedFaction = tile.faction;
-                            editorFactionBrush = tile.faction;
-                            openEditorSection(EditorAccordionSection.CITY);
-                            menuMessage = citySelectLabels[i] + " を選択しました。";
-                            rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                                    editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                                    editorToolButtons[0].y);
-                            return true;
-                        }
-                    }
-                    menuMessage = "都市を見つけられませんでした。";
-                    return true;
-                }
-            }
-        }
-
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.TERRAIN) && i < terrainButtons.length; i++) {
-            if (isEditorScrollableButtonVisible(terrainButtons[i]) && terrainButtons[i].contains(screenX, uiY)) {
-                editorTerrainBrush = TerrainType.values()[i];
-                editorTool = EditorTool.TERRAIN;
-                openEditorSection(EditorAccordionSection.TERRAIN);
-                menuMessage = "地形ブラシ: " + terrainLabel(editorTerrainBrush);
-                return true;
-            }
-        }
-
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.FACTION) && i < factionButtons.length; i++) {
-            if (isEditorScrollableButtonVisible(factionButtons[i]) && factionButtons[i].contains(screenX, uiY)) {
-                editorFactionBrush = i == 0 ? null : Faction.values()[i - 1];
-                editorTool = EditorTool.FACTION;
-                selectedCityId = -1;
-                selectedFaction = editorFactionBrush;
-                openEditorSection(EditorAccordionSection.FACTION);
-                menuMessage = editorFactionBrush == null ? "都市圏ブラシ: なし" : "都市圏ブラシ: " + editorFactionBrush.getLabel();
-                rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                        editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                        editorToolButtons[0].y);
-                return true;
-            }
-        }
-
-        if (saveMapButton != null && saveMapButton.contains(screenX, uiY)) {
-            String capitalWarning = validateCapitalsForSave();
-            if (capitalWarning != null) {
-                menuMessage = capitalWarning;
-                return true;
-            }
-            MapDefinition savedMap = MapRepository.saveCustomMap(hexMapModel);
-            currentMapDefinition = savedMap;
-            editorHasUnsavedChanges = false;
-            menuMessage = "カスタムマップを保存しました: " + savedMap.getDisplayName();
-            return true;
-        }
-
-        if (overwriteMapButton != null && overwriteMapButton.contains(screenX, uiY)) {
-            if (!canOverwriteCurrentMap()) {
-                menuMessage = "上書き対象のカスタムマップを開いてください。";
-                return true;
-            }
-            String capitalWarning = validateCapitalsForSave();
-            if (capitalWarning != null) {
-                menuMessage = capitalWarning;
-                return true;
-            }
-            currentMapDefinition = MapRepository.overwriteCustomMap(hexMapModel, currentMapDefinition);
-            editorHasUnsavedChanges = false;
-            menuMessage = "カスタムマップを上書き保存しました: " + currentMapDefinition.getDisplayName();
-            return true;
-        }
-
-        return true;
-    }
-
-    private void applyEditorToTile(HexMapModel.Tile tile, boolean fromDrag) {
-        if (editorTool == EditorTool.TERRAIN) {
-            if (editorTerrainBrush == TerrainType.WATER && tile.cityCenter) {
-                menuMessage = "都市は極地以外の陸上タイルに置いてください。";
-                return;
-            }
-            tile.terrain = editorTerrainBrush;
-            if (tile.terrain.isPolar()) {
-                tile.faction = null;
-                tile.capital = false;
-                tile.cityCenter = false;
-                tile.cityId = -1;
-            }
-            menuMessage = "地形を変更: " + terrainLabel(tile.terrain);
-        } else if (editorTool == EditorTool.FACTION) {
-            if (tile.terrain.isPolar()) {
-                menuMessage = "極地には都市圏を設定できません。";
-                return;
-            }
-            if (tile.cityCenter) {
-                if (tile.cityId < 0) {
-                    tile.cityId = nextCityId++;
-                }
-                editorFactionBrush = tile.faction;
-                selectedFaction = tile.faction;
-                selectedCityId = tile.cityId;
-                rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                        editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                        editorToolButtons[0].y);
-                menuMessage = tile.capital ? "首都を選択: " + tile.faction.getLabel() : "都市を選択: " + tile.faction.getLabel();
-                return;
-            }
-            if (selectedCityId < 0 || editorFactionBrush == null) {
-                menuMessage = "先に都市を選択してください。";
-                return;
-            }
-            if (tile.faction != null && tile.faction != editorFactionBrush) {
-                menuMessage = "他国の都市圏は直接設定できません。先に解除してください。";
-                return;
-            }
-            if (tile.cityId >= 0 && tile.cityId != selectedCityId) {
-                menuMessage = "別の都市圏と重複します。";
-                return;
-            }
-            tile.faction = editorFactionBrush;
-            tile.cityId = selectedCityId;
-            if (tile.capital) {
-                tile.capital = false;
-            }
-            if (tile.cityCenter) {
-                tile.cityCenter = false;
-            }
-            menuMessage = "都市圏を変更: " + tile.faction.getLabel();
-        } else {
-            if (tile.terrain.isPolar()) {
-                menuMessage = "都市/首都は極地には設定できません。";
-                return;
-            }
-            if (tile.faction == null) {
-                Faction placementFaction = editorFactionBrush != null ? editorFactionBrush : selectedFaction;
-                if (placementFaction == null) {
-                    menuMessage = "先に国家を選択してください。";
-                    return;
-                }
-                tile.faction = placementFaction;
-            }
-            if (tile.cityId < 0) {
-                tile.cityId = nextCityId++;
-            }
-            if (!tile.cityCenter) {
-                tile.cityCenter = true;
-                tile.capital = false;
-                selectedCityId = tile.cityId;
-                selectedFaction = tile.faction;
-                rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                        editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                        editorToolButtons[0].y);
-                menuMessage = "都市を設定: " + tile.faction.getLabel();
-            } else if (!tile.capital) {
-                clearFactionCapital(tile.faction, tile);
-                tile.capital = true;
-                tile.cityCenter = true;
-                selectedCityId = tile.cityId;
-                selectedFaction = tile.faction;
-                rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                        editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                        editorToolButtons[0].y);
-                menuMessage = "首都に昇格しました: " + tile.faction.getLabel();
-            } else {
-                tile.capital = false;
-                tile.cityCenter = true;
-                selectedCityId = tile.cityId;
-                selectedFaction = tile.faction;
-                rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
-                        editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
-                        editorToolButtons[0].y);
-                menuMessage = "都市に降格しました: " + tile.faction.getLabel();
-            }
-        }
-        selectedFaction = tile.faction;
-        editorHasUnsavedChanges = true;
-    }
-
-    private boolean canOverwriteCurrentMap() {
-        return currentMapDefinition != null
-                && !currentMapDefinition.isOfficial()
-                && currentMapDefinition.getId() != null
-                && currentMapDefinition.getId().startsWith("custom-map-");
-    }
-
-    private String validateCapitalsForSave() {
-        List<String> missingCapitalFactions = collectMissingCapitalFactions();
-        if (missingCapitalFactions.isEmpty()) {
-            return null;
-        }
-        return "首都が未設定の国家があります: " + String.join(" / ", missingCapitalFactions);
-    }
-
-    private List<String> collectMissingCapitalFactions() {
-        List<String> missingCapitalFactions = new ArrayList<>();
-        for (Faction faction : Faction.values()) {
-            boolean hasOwnedTile = false;
-            boolean hasCapital = false;
-            for (HexMapModel.Tile tile : hexMapModel.getTiles()) {
-                if (tile.faction != faction) {
-                    continue;
-                }
-                hasOwnedTile = true;
-                if (tile.capital) {
-                    hasCapital = true;
-                    break;
-                }
-            }
-            if (hasOwnedTile && !hasCapital) {
-                missingCapitalFactions.add(faction.getLabel());
-            }
-        }
-        return missingCapitalFactions;
-    }
-
-    private String buildEditorValidationSummary() {
-        List<String> missingCapitalFactions = collectMissingCapitalFactions();
-        List<String> centerlessCityAreas = collectCenterlessCityAreas();
-        List<String> isolatedCities = collectIsolatedCities();
-        if (missingCapitalFactions.isEmpty()) {
-            if (!centerlessCityAreas.isEmpty()) {
-                return summarizeValidationList("都市中心なし", centerlessCityAreas);
-            }
-            if (!isolatedCities.isEmpty()) {
-                return summarizeValidationList("孤立都市", isolatedCities);
-            }
-            return editorHasUnsavedChanges ? "保存チェック: 問題なし / 未保存あり" : "保存チェック: 問題なし";
-        }
-        return summarizeValidationList("首都未設定", missingCapitalFactions);
-    }
-
-    private List<String> collectCenterlessCityAreas() {
-        List<String> centerlessCityAreas = new ArrayList<>();
-        Set<Integer> seenCityIds = new HashSet<>();
-        for (HexMapModel.Tile tile : hexMapModel.getTiles()) {
-            if (tile.cityId < 0 || tile.faction == null) {
-                continue;
-            }
-            if (seenCityIds.contains(tile.cityId)) {
-                continue;
-            }
-            seenCityIds.add(tile.cityId);
-            boolean hasCenter = false;
-            for (HexMapModel.Tile other : hexMapModel.getTiles()) {
-                if (other.cityId == tile.cityId && other.cityCenter) {
-                    hasCenter = true;
-                    break;
-                }
-            }
-            if (!hasCenter) {
-                centerlessCityAreas.add(tile.faction.getLabel() + " #" + tile.cityId);
-            }
-        }
-        return centerlessCityAreas;
-    }
-
-    private List<String> collectIsolatedCities() {
-        List<String> isolatedCities = new ArrayList<>();
-        for (HexMapModel.Tile tile : hexMapModel.getTiles()) {
-            if (!tile.cityCenter || tile.cityId < 0 || tile.faction == null) {
-                continue;
-            }
-            int cityAreaCount = 0;
-            for (HexMapModel.Tile other : hexMapModel.getTiles()) {
-                if (other.cityId == tile.cityId) {
-                    cityAreaCount++;
-                }
-            }
-            if (cityAreaCount <= 1) {
-                isolatedCities.add((tile.capital ? "首都" : "都市") + " #" + tile.cityId);
-            }
-        }
-        return isolatedCities;
-    }
-
-    private String summarizeValidationList(String prefix, List<String> items) {
-        if (items.size() <= 2) {
-            return prefix + ": " + String.join(" / ", items);
-        }
-        return prefix + ": " + items.get(0) + " / " + items.get(1) + " / ほか" + (items.size() - 2) + "件";
-    }
-
-    private void clearFactionCapital(Faction faction, HexMapModel.Tile newCapitalTile) {
+    public void clearFactionCapital(Faction faction, HexMapModel.Tile newCapitalTile) {
         for (HexMapModel.Tile other : hexMapModel.getTiles()) {
             if (other.faction == faction && other.capital && other != newCapitalTile) {
                 other.capital = false;
@@ -1871,7 +1443,7 @@ public class LuminaGame extends ApplicationAdapter {
         return true;
     }
 
-    private void scrollEditorPanel(float delta) {
+    public void scrollEditorPanel(float delta) {
         if (editorScrollMax <= 0f) {
             return;
         }
@@ -1885,7 +1457,7 @@ public class LuminaGame extends ApplicationAdapter {
         relayoutEditorScrollableContent();
     }
 
-    private void relayoutEditorScrollableContent() {
+    public void relayoutEditorScrollableContent() {
         if (editorPanelRect == null || terrainButtons == null || factionButtons == null || editorToolButtons == null || editorToolButtons.length == 0) {
             return;
         }
@@ -1905,7 +1477,7 @@ public class LuminaGame extends ApplicationAdapter {
         layoutEditorSections(innerX, innerWidth, terrainWidth, baseContentTop + editorScrollOffset, true);
     }
 
-    private boolean isEditorScrollableButtonVisible(Rectangle button) {
+    public boolean isEditorScrollableButtonVisible(Rectangle button) {
         return button.y + button.height >= editorListViewportBottom && button.y <= editorListViewportTop;
     }
 
@@ -2072,7 +1644,7 @@ public class LuminaGame extends ApplicationAdapter {
         }
 
         if (gameMode == GameMode.MAP_EDITOR) {
-            renderEditorPanelShapes();
+            mapEditorController.renderEditorPanelShapes();
         }
         if (gameMode == GameMode.PLAY && turnPhase == TurnPhase.PLAYER_FACTION_SELECT) {
             renderFactionSelectionPanelShapes();
@@ -2096,7 +1668,7 @@ public class LuminaGame extends ApplicationAdapter {
             menuFont.draw(spriteBatch, "ターン終了", endTurnButton.x + 18f, endTurnButton.y + endTurnButton.height * 0.68f);
         }
 
-        String statusText = gameMode == GameMode.MAP_EDITOR ? buildEditorStatusText()
+        String statusText = gameMode == GameMode.MAP_EDITOR ? mapEditorController.buildEditorStatusText()
                 : buildPlayStatusText();
         menuFont.draw(spriteBatch, statusText, 16f, topMenuBar.y + topMenuBar.height - 14f);
         if (!menuMessage.isEmpty()) {
@@ -2104,7 +1676,7 @@ public class LuminaGame extends ApplicationAdapter {
         }
 
         if (gameMode == GameMode.MAP_EDITOR) {
-            renderEditorPanelText();
+            mapEditorController.renderEditorPanelText();
         }
         if (gameMode == GameMode.PLAY && turnPhase == TurnPhase.PLAYER_FACTION_SELECT) {
             renderFactionSelectionPanelText();
@@ -2213,227 +1785,7 @@ public class LuminaGame extends ApplicationAdapter {
         return "ターン " + turnNumber + " / あなた: " + yourFaction + " / 現在: " + turnFaction;
     }
 
-    private void renderEditorPanelShapes() {
-        boolean hasValidationWarnings = !collectMissingCapitalFactions().isEmpty()
-                || !collectCenterlessCityAreas().isEmpty()
-                || !collectIsolatedCities().isEmpty();
-        shapeRenderer.setColor(0.10f, 0.12f, 0.18f, 0.94f);
-        shapeRenderer.rect(editorPanelRect.x, editorPanelRect.y, editorPanelRect.width, editorPanelRect.height);
-
-        if (editorFactionBadgeRect != null) {
-            float pulse = 0.84f + 0.16f * (float) Math.sin(TimeUtils.millis() / 180.0);
-            shapeRenderer.setColor(0.16f, 0.18f, 0.24f, 1f);
-            shapeRenderer.rect(editorFactionBadgeRect.x, editorFactionBadgeRect.y, editorFactionBadgeRect.width, editorFactionBadgeRect.height);
-            com.badlogic.gdx.graphics.Color brushColor = editorFactionBrush == null
-                    ? new com.badlogic.gdx.graphics.Color(0.35f, 0.35f, 0.38f, 1f)
-                    : new com.badlogic.gdx.graphics.Color(editorFactionBrush.getColor());
-            shapeRenderer.setColor(brushColor);
-            shapeRenderer.rect(editorFactionBadgeRect.x + 6f, editorFactionBadgeRect.y + 4f, 18f, 16f);
-            if (editorFactionBrush != null) {
-                com.badlogic.gdx.graphics.Color glow = new com.badlogic.gdx.graphics.Color(editorFactionBrush.getColor());
-                glow.a = pulse;
-                shapeRenderer.setColor(glow);
-                shapeRenderer.rect(editorFactionBadgeRect.x, editorFactionBadgeRect.y + editorFactionBadgeRect.height - 3f,
-                        editorFactionBadgeRect.width, 3f);
-            }
-        }
-        if (editorCityNameRect != null) {
-            shapeRenderer.setColor(editorCityNameEditing ? 0.28f : 0.16f, 0.18f, editorCityNameEditing ? 0.34f : 0.24f, 1f);
-            shapeRenderer.rect(editorCityNameRect.x, editorCityNameRect.y, editorCityNameRect.width, editorCityNameRect.height);
-        }
-        if (editorCityNameButtonRect != null) {
-            boolean canEditCityName = selectedCityId >= 0;
-            shapeRenderer.setColor(
-                    editorCityNameEditing ? 0.36f : (canEditCityName ? 0.24f : 0.18f),
-                    editorCityNameEditing ? 0.30f : (canEditCityName ? 0.28f : 0.20f),
-                    editorCityNameEditing ? 0.18f : (canEditCityName ? 0.36f : 0.22f),
-                    1f);
-            shapeRenderer.rect(editorCityNameButtonRect.x, editorCityNameButtonRect.y,
-                    editorCityNameButtonRect.width, editorCityNameButtonRect.height);
-        }
-        renderEditorAccordionHeader(citySectionHeaderRect, isEditorSectionExpanded(EditorAccordionSection.CITY));
-        renderEditorAccordionHeader(terrainSectionHeaderRect, isEditorSectionExpanded(EditorAccordionSection.TERRAIN));
-        renderEditorAccordionHeader(factionSectionHeaderRect, isEditorSectionExpanded(EditorAccordionSection.FACTION));
-
-        for (int i = 0; i < editorToolButtons.length; i++) {
-            Rectangle button = editorToolButtons[i];
-            boolean active = editorTool == EditorTool.values()[i];
-            shapeRenderer.setColor(active ? 0.42f : 0.20f, active ? 0.32f : 0.22f, active ? 0.18f : 0.28f, 1f);
-            shapeRenderer.rect(button.x, button.y, button.width, button.height);
-        }
-
-        TerrainType[] terrains = TerrainType.values();
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.TERRAIN) && i < terrainButtons.length; i++) {
-            Rectangle button = terrainButtons[i];
-            if (!isEditorScrollableButtonVisible(button)) {
-                continue;
-            }
-            com.badlogic.gdx.graphics.Color terrainColor = terrainButtonColor(terrains[i]);
-            if (editorTerrainBrush == terrains[i]) {
-                terrainColor = terrainColor.cpy().lerp(com.badlogic.gdx.graphics.Color.WHITE, 0.35f);
-            }
-            shapeRenderer.setColor(terrainColor);
-            shapeRenderer.rect(button.x, button.y, button.width, button.height);
-        }
-
-        if (isEditorSectionExpanded(EditorAccordionSection.CITY) && citySelectButtons != null) {
-            for (int i = 0; i < citySelectButtons.length; i++) {
-                Rectangle button = citySelectButtons[i];
-                if (!isEditorScrollableButtonVisible(button)) {
-                    continue;
-                }
-                if (citySelectIds[i] == selectedCityId) {
-                    shapeRenderer.setColor(0.42f, 0.36f, 0.18f, 1f);
-                } else {
-                    shapeRenderer.setColor(0.22f, 0.24f, 0.30f, 0.92f);
-                }
-                shapeRenderer.rect(button.x, button.y, button.width, button.height);
-            }
-        }
-
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.FACTION) && i < factionButtons.length; i++) {
-            Rectangle button = factionButtons[i];
-            if (!isEditorScrollableButtonVisible(button)) {
-                continue;
-            }
-            com.badlogic.gdx.graphics.Color color = i == 0
-                    ? new com.badlogic.gdx.graphics.Color(0.20f, 0.20f, 0.22f, 1f)
-                    : new com.badlogic.gdx.graphics.Color(Faction.values()[i - 1].getColor());
-            if ((i == 0 && editorFactionBrush == null) || (i > 0 && editorFactionBrush == Faction.values()[i - 1])) {
-                color = color.cpy().lerp(com.badlogic.gdx.graphics.Color.WHITE, 0.30f);
-            }
-            shapeRenderer.setColor(color);
-            shapeRenderer.rect(button.x, button.y, button.width, button.height);
-        }
-
-        if (editorScrollMax > 0f) {
-            float trackX = editorPanelRect.x + editorPanelRect.width - 8f;
-            float trackHeight = editorListViewportTop - editorListViewportBottom;
-            shapeRenderer.setColor(0.20f, 0.22f, 0.28f, 1f);
-            shapeRenderer.rect(trackX, editorListViewportBottom, 4f, trackHeight);
-            float thumbHeight = Math.max(28f, trackHeight * (trackHeight / (trackHeight + editorScrollMax)));
-            float travel = Math.max(0f, trackHeight - thumbHeight);
-            float thumbY = editorListViewportTop - thumbHeight - (travel * (editorScrollOffset / editorScrollMax));
-            shapeRenderer.setColor(0.55f, 0.60f, 0.70f, 1f);
-            shapeRenderer.rect(trackX - 1f, thumbY, 6f, thumbHeight);
-        }
-
-        if (editorValidationRect != null) {
-            shapeRenderer.setColor(hasValidationWarnings ? 0.44f : (editorHasUnsavedChanges ? 0.24f : 0.16f),
-                    hasValidationWarnings ? 0.20f : (editorHasUnsavedChanges ? 0.24f : 0.28f),
-                    hasValidationWarnings ? 0.18f : (editorHasUnsavedChanges ? 0.14f : 0.22f),
-                    1f);
-            shapeRenderer.rect(editorValidationRect.x, editorValidationRect.y,
-                    editorValidationRect.width, editorValidationRect.height);
-        }
-
-        shapeRenderer.setColor(hasValidationWarnings ? 0.42f : (editorHasUnsavedChanges ? 0.30f : 0.22f),
-                hasValidationWarnings ? 0.26f : (editorHasUnsavedChanges ? 0.46f : 0.42f),
-                hasValidationWarnings ? 0.20f : (editorHasUnsavedChanges ? 0.26f : 0.30f),
-                1f);
-        shapeRenderer.rect(saveMapButton.x, saveMapButton.y, saveMapButton.width, saveMapButton.height);
-        shapeRenderer.setColor(canOverwriteCurrentMap()
-                        ? (hasValidationWarnings ? 0.46f : (editorHasUnsavedChanges ? 0.40f : 0.36f))
-                        : 0.26f,
-                hasValidationWarnings ? 0.24f : (editorHasUnsavedChanges ? 0.30f : 0.34f),
-                hasValidationWarnings ? 0.18f : (editorHasUnsavedChanges ? 0.22f : 0.28f),
-                1f);
-        shapeRenderer.rect(overwriteMapButton.x, overwriteMapButton.y, overwriteMapButton.width, overwriteMapButton.height);
-    }
-
-    private void renderEditorPanelText() {
-        boolean hasValidationWarnings = !collectMissingCapitalFactions().isEmpty()
-                || !collectCenterlessCityAreas().isEmpty()
-                || !collectIsolatedCities().isEmpty();
-        float titleY = editorPanelRect.y + editorPanelRect.height - 4f;
-        menuFont.draw(spriteBatch, "編集モード", editorPanelRect.x + 14f, titleY);
-        if (editorFactionBadgeRect != null) {
-            menuFont.draw(spriteBatch, "国家ブラシ: " + currentEditorFactionLabel(),
-                    editorFactionBadgeRect.x + 30f, editorFactionBadgeRect.y + 18f);
-        }
-        if (editorCityNameRect != null) {
-            HexMapModel.Tile selectedCity = findCityCenterTile(selectedCityId);
-            String cityNameLabel = selectedCity == null ? "都市名: 未設定"
-                    : "都市名: " + (editorCityNameEditing ? editorCityNameBuffer.toString() + "_" : cityDisplayName(selectedCity));
-            menuFont.draw(spriteBatch, cityNameLabel, editorCityNameRect.x + 8f, editorCityNameRect.y + 18f);
-        }
-        if (editorCityNameButtonRect != null) {
-            String cityNameButtonLabel = editorCityNameEditing ? "保存" : "編集";
-            menuFont.draw(spriteBatch, cityNameButtonLabel,
-                    editorCityNameButtonRect.x + 12f, editorCityNameButtonRect.y + 18f);
-        }
-
-        String[] toolLabels = {"地形", "都市圏", "都市/首都"};
-        for (int i = 0; i < editorToolButtons.length; i++) {
-            Rectangle button = editorToolButtons[i];
-            menuFont.draw(spriteBatch, toolLabels[i], button.x + 10f, button.y + 22f);
-        }
-
-        renderEditorAccordionHeaderText(citySectionHeaderRect, "都市", citySelectButtons.length,
-                isEditorSectionExpanded(EditorAccordionSection.CITY));
-        renderEditorAccordionHeaderText(terrainSectionHeaderRect, "地形", terrainButtons.length,
-                isEditorSectionExpanded(EditorAccordionSection.TERRAIN));
-        renderEditorAccordionHeaderText(factionSectionHeaderRect, "都市圏", factionButtons.length,
-                isEditorSectionExpanded(EditorAccordionSection.FACTION));
-
-        if (isEditorSectionExpanded(EditorAccordionSection.CITY) && citySelectButtons != null) {
-            for (int i = 0; i < citySelectButtons.length; i++) {
-                Rectangle button = citySelectButtons[i];
-                if (!isEditorScrollableButtonVisible(button)) {
-                    continue;
-                }
-                String label = citySelectLabels[i];
-                if (citySelectIds[i] == selectedCityId) {
-                    label = "▶ " + label;
-                }
-                menuFont.draw(spriteBatch, label, button.x + 8f, button.y + 21f);
-            }
-        }
-        TerrainType[] terrains = TerrainType.values();
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.TERRAIN) && i < terrainButtons.length; i++) {
-            Rectangle button = terrainButtons[i];
-            if (!isEditorScrollableButtonVisible(button)) {
-                continue;
-            }
-            menuFont.draw(spriteBatch, terrainLabel(terrains[i]), button.x + 8f, button.y + 21f);
-        }
-
-        for (int i = 0; isEditorSectionExpanded(EditorAccordionSection.FACTION) && i < factionButtons.length; i++) {
-            Rectangle button = factionButtons[i];
-            if (!isEditorScrollableButtonVisible(button)) {
-                continue;
-            }
-            String label = i == 0 ? "都市圏なし" : Faction.values()[i - 1].getLabel();
-            menuFont.draw(spriteBatch, label, button.x + 8f, button.y + 21f);
-        }
-
-        if (editorValidationRect != null) {
-            menuFont.setColor(hasValidationWarnings
-                    ? com.badlogic.gdx.graphics.Color.SALMON
-                    : (editorHasUnsavedChanges ? com.badlogic.gdx.graphics.Color.GOLD : com.badlogic.gdx.graphics.Color.WHITE));
-            menuFont.draw(spriteBatch, buildEditorValidationSummary(), editorValidationRect.x + 8f, editorValidationRect.y + 26f);
-            menuFont.setColor(com.badlogic.gdx.graphics.Color.WHITE);
-        }
-
-        menuFont.draw(spriteBatch, "マップ保存", saveMapButton.x + 10f, saveMapButton.y + 31f);
-        menuFont.draw(spriteBatch, "上書き保存", overwriteMapButton.x + 10f, overwriteMapButton.y + 28f);
-    }
-
-    private String buildEditorStatusText() {
-        String toolText;
-        if (editorTool == EditorTool.TERRAIN) {
-            toolText = "地形:" + terrainLabel(editorTerrainBrush);
-        } else if (editorTool == EditorTool.FACTION) {
-            toolText = "都市圏:" + (editorFactionBrush == null ? "なし" : editorFactionBrush.getLabel())
-                    + (selectedCityId < 0 ? " / 都市未選択" : " / 都市ID " + selectedCityId);
-        } else {
-            toolText = "都市/首都" + (selectedCityId < 0 ? "" : " / 都市ID " + selectedCityId);
-        }
-        return "モード: マップエディタ / " + (editorHasUnsavedChanges ? "未保存あり / " : "")
-                + "国家:" + currentEditorFactionLabel() + " / " + toolText;
-    }
-
-    private HexMapModel.Tile findCityCenterTile(int cityId) {
+    public HexMapModel.Tile findCityCenterTile(int cityId) {
         if (cityId < 0) {
             return null;
         }
@@ -2445,33 +1797,7 @@ public class LuminaGame extends ApplicationAdapter {
         return null;
     }
 
-    private String cityDisplayName(HexMapModel.Tile tile) {
-        if (tile == null) {
-            return "未設定";
-        }
-        if (tile.cityName != null && !tile.cityName.isEmpty()) {
-            return tile.cityName;
-        }
-        return tile.capital ? "未設定の首都" : "未設定の都市";
-    }
-
-    private void renderEditorAccordionHeader(Rectangle rect, boolean expanded) {
-        if (rect == null) {
-            return;
-        }
-        shapeRenderer.setColor(expanded ? 0.24f : 0.16f, expanded ? 0.24f : 0.18f, expanded ? 0.34f : 0.26f, 1f);
-        shapeRenderer.rect(rect.x, rect.y, rect.width, rect.height);
-    }
-
-    private void renderEditorAccordionHeaderText(Rectangle rect, String label, int itemCount, boolean expanded) {
-        if (rect == null || rect.y + rect.height < editorListViewportBottom || rect.y > editorListViewportTop) {
-            return;
-        }
-        String prefix = expanded ? "[-] " : "[+] ";
-        menuFont.draw(spriteBatch, prefix + label + " (" + itemCount + ")", rect.x + 8f, rect.y + 18f);
-    }
-
-    private void startEditorCityNameEditing(int cityId) {
+    public void startEditorCityNameEditing(int cityId) {
         HexMapModel.Tile cityCenter = findCityCenterTile(cityId);
         if (cityCenter == null) {
             menuMessage = "先に都市を設定してください。";
@@ -2484,7 +1810,7 @@ public class LuminaGame extends ApplicationAdapter {
         menuMessage = "都市名を入力中: Enterで保存 / Escで戻る";
     }
 
-    private void commitEditorCityName() {
+    public void commitEditorCityName() {
         HexMapModel.Tile cityCenter = findCityCenterTile(editingCityNameId);
         if (cityCenter == null) {
             cancelEditorCityNameEditing();
@@ -2498,20 +1824,228 @@ public class LuminaGame extends ApplicationAdapter {
         rebuildCitySelectionButtons(editorPanelRect.x + EDITOR_PANEL_MARGIN,
                 editorPanelRect.width - EDITOR_PANEL_MARGIN * 2f,
                 editorToolButtons[0].y);
-        menuMessage = "都市名を設定: " + cityDisplayName(cityCenter);
+        menuMessage = "都市名を設定: " + mapEditorController.cityDisplayName(cityCenter);
     }
 
-    private void cancelEditorCityNameEditing() {
+    public void cancelEditorCityNameEditing() {
         editorCityNameEditing = false;
         editingCityNameId = -1;
         editorCityNameBuffer.setLength(0);
     }
 
-    private String currentEditorFactionLabel() {
-        return editorFactionBrush == null ? "なし" : editorFactionBrush.getLabel();
+    public void setEditorTool(EditorTool tool) {
+        editorTool = tool;
     }
 
-    private com.badlogic.gdx.graphics.Color terrainButtonColor(TerrainType terrain) {
+    public void setEditorTerrainBrush(TerrainType terrain) {
+        editorTerrainBrush = terrain;
+    }
+
+    public void setEditorFactionBrush(Faction faction) {
+        editorFactionBrush = faction;
+    }
+
+    public void setSelectedFaction(Faction faction) {
+        selectedFaction = faction;
+    }
+
+    public void setSelectedCityId(int cityId) {
+        selectedCityId = cityId;
+    }
+
+    public void setNextCityId(int nextCityId) {
+        this.nextCityId = nextCityId;
+    }
+
+    public void setLastEditorPaintQ(int q) {
+        lastEditorPaintQ = q;
+    }
+
+    public void setLastEditorPaintR(int r) {
+        lastEditorPaintR = r;
+    }
+
+    public void setEditorHasUnsavedChanges(boolean hasUnsavedChanges) {
+        editorHasUnsavedChanges = hasUnsavedChanges;
+    }
+
+    public void setMenuMessage(String message) {
+        menuMessage = message;
+    }
+
+    public ShapeRenderer getShapeRenderer() {
+        return shapeRenderer;
+    }
+
+    public SpriteBatch getSpriteBatch() {
+        return spriteBatch;
+    }
+
+    public BitmapFont getMenuFont() {
+        return menuFont;
+    }
+
+    public EditorTool getEditorTool() {
+        return editorTool;
+    }
+
+    public TerrainType getEditorTerrainBrush() {
+        return editorTerrainBrush;
+    }
+
+    public Faction getEditorFactionBrush() {
+        return editorFactionBrush;
+    }
+
+    public Faction getSelectedFaction() {
+        return selectedFaction;
+    }
+
+    public void setSelectedQ(int q) {
+        selectedQ = q;
+    }
+
+    public void setSelectedR(int r) {
+        selectedR = r;
+    }
+
+    public int getSelectedCityId() {
+        return selectedCityId;
+    }
+
+    public int getSelectedQ() {
+        return selectedQ;
+    }
+
+    public int getSelectedR() {
+        return selectedR;
+    }
+
+    public boolean isEditorCityNameEditing() {
+        return editorCityNameEditing;
+    }
+
+    public StringBuilder getEditorCityNameBuffer() {
+        return editorCityNameBuffer;
+    }
+
+    public boolean hasEditorUnsavedChanges() {
+        return editorHasUnsavedChanges;
+    }
+
+    public int getNextCityId() {
+        return nextCityId;
+    }
+
+    public int getLastEditorPaintQ() {
+        return lastEditorPaintQ;
+    }
+
+    public int getLastEditorPaintR() {
+        return lastEditorPaintR;
+    }
+
+    public float getEditorListViewportTop() {
+        return editorListViewportTop;
+    }
+
+    public float getEditorListViewportBottom() {
+        return editorListViewportBottom;
+    }
+
+    public float getEditorScrollOffset() {
+        return editorScrollOffset;
+    }
+
+    public float getEditorScrollMax() {
+        return editorScrollMax;
+    }
+
+    public Rectangle getEditorPanelRect() {
+        return editorPanelRect;
+    }
+
+    public Rectangle[] getEditorToolButtons() {
+        return editorToolButtons;
+    }
+
+    public Rectangle getEditorFactionBadgeRect() {
+        return editorFactionBadgeRect;
+    }
+
+    public Rectangle getEditorCityNameRect() {
+        return editorCityNameRect;
+    }
+
+    public Rectangle getEditorCityNameButtonRect() {
+        return editorCityNameButtonRect;
+    }
+
+    public Rectangle getCitySectionHeaderRect() {
+        return citySectionHeaderRect;
+    }
+
+    public Rectangle getTerrainSectionHeaderRect() {
+        return terrainSectionHeaderRect;
+    }
+
+    public Rectangle getFactionSectionHeaderRect() {
+        return factionSectionHeaderRect;
+    }
+
+    public Rectangle[] getCitySelectButtons() {
+        return citySelectButtons;
+    }
+
+    public int[] getCitySelectIds() {
+        return citySelectIds;
+    }
+
+    public String[] getCitySelectLabels() {
+        return citySelectLabels;
+    }
+
+    public Rectangle[] getTerrainButtons() {
+        return terrainButtons;
+    }
+
+    public Rectangle[] getFactionButtons() {
+        return factionButtons;
+    }
+
+    public Rectangle getEditorValidationRect() {
+        return editorValidationRect;
+    }
+
+    public Rectangle getSaveMapButton() {
+        return saveMapButton;
+    }
+
+    public Rectangle getOverwriteMapButton() {
+        return overwriteMapButton;
+    }
+
+    public com.badlogic.gdx.graphics.OrthographicCamera getCamera() {
+        return camera;
+    }
+
+    public HexMapModel getHexMapModel() {
+        return hexMapModel;
+    }
+
+    public MapDefinition getCurrentMapDefinition() {
+        return currentMapDefinition;
+    }
+
+    public void setCurrentMapDefinition(MapDefinition mapDefinition) {
+        currentMapDefinition = mapDefinition;
+    }
+
+    public List<HexMapModel.Tile> getTiles() {
+        return hexMapModel.getTiles();
+    }
+
+    public com.badlogic.gdx.graphics.Color terrainButtonColor(TerrainType terrain) {
         switch (terrain) {
             case ROAD:
                 return new com.badlogic.gdx.graphics.Color(0.72f, 0.64f, 0.44f, 1f);
@@ -2535,34 +2069,6 @@ public class LuminaGame extends ApplicationAdapter {
             case PLAIN:
             default:
                 return new com.badlogic.gdx.graphics.Color(0.64f, 0.75f, 0.52f, 1f);
-        }
-    }
-
-    private String terrainLabel(TerrainType terrain) {
-        switch (terrain) {
-            case PLAIN:
-                return "平地";
-            case ROAD:
-                return "街道";
-            case DESERT:
-                return "砂漠";
-            case TUNDRA:
-                return "ツンドラ";
-            case FOREST:
-                return "森林";
-            case HILLS:
-                return "丘陵";
-            case ANTARCTIC:
-                return "南極";
-            case ARCTIC:
-                return "北極";
-            case MOUNTAIN:
-                return "山岳";
-            case MOUNTAIN_RANGE:
-                return "山脈";
-            case WATER:
-            default:
-                return "海";
         }
     }
 
