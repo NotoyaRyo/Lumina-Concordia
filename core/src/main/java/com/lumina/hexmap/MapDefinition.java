@@ -86,13 +86,31 @@ public class MapDefinition {
         private final TerrainType terrain;
         private final Faction faction;
         private final boolean capital;
+        private final boolean cityCenter;
+        private final int cityId;
+        private final String cityName;
 
         public TileData(int q, int r, TerrainType terrain, Faction faction, boolean capital) {
+            this(q, r, terrain, faction, capital, capital, -1, "");
+        }
+
+        public TileData(int q, int r, TerrainType terrain, Faction faction, boolean capital, boolean cityCenter) {
+            this(q, r, terrain, faction, capital, cityCenter, -1, "");
+        }
+
+        public TileData(int q, int r, TerrainType terrain, Faction faction, boolean capital, boolean cityCenter, int cityId) {
+            this(q, r, terrain, faction, capital, cityCenter, cityId, "");
+        }
+
+        public TileData(int q, int r, TerrainType terrain, Faction faction, boolean capital, boolean cityCenter, int cityId, String cityName) {
             this.q = q;
             this.r = r;
             this.terrain = terrain;
             this.faction = faction;
             this.capital = capital;
+            this.cityCenter = cityCenter;
+            this.cityId = cityId;
+            this.cityName = cityName == null ? "" : cityName;
         }
 
         public int getQ() {
@@ -113,6 +131,18 @@ public class MapDefinition {
 
         public boolean isCapital() {
             return capital;
+        }
+
+        public boolean isCityCenter() {
+            return cityCenter;
+        }
+
+        public int getCityId() {
+            return cityId;
+        }
+
+        public String getCityName() {
+            return cityName;
         }
     }
 }

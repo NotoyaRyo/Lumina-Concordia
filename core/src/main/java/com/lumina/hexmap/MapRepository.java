@@ -78,7 +78,10 @@ public final class MapRepository {
                     .append(tile.getR()).append(',')
                     .append(tile.getTerrain().name()).append(',')
                     .append(tile.getFaction() == null ? "" : tile.getFaction().name()).append(',')
-                    .append(tile.isCapital())
+                    .append(tile.isCapital()).append(',')
+                    .append(tile.isCityCenter()).append(',')
+                    .append(tile.getCityId()).append(',')
+                    .append(escapeField(tile.getCityName()))
                     .append('\n');
         }
         file.writeString(builder.toString(), false, StandardCharsets.UTF_8.name());
@@ -148,8 +151,8 @@ public final class MapRepository {
     }
 
     private static MapDefinition.TileData parseTile(String serialized, String path) {
-        String[] values = serialized.split(",", -1);
-        if (values.length != 5) {
+        String[] values = splitEscaped(serialized);
+        if (values.length != 5 && values.length != 6 && values.length != 7 && values.length != 8) {
             throw new IllegalArgumentException("Invalid tile entry in " + path + ": " + serialized);
         }
         int q = Integer.parseInt(values[0]);
@@ -157,6 +160,90 @@ public final class MapRepository {
         TerrainType terrain = TerrainType.valueOf(values[2]);
         Faction faction = values[3].isEmpty() ? null : Faction.valueOf(values[3]);
         boolean capital = Boolean.parseBoolean(values[4]);
-        return new MapDefinition.TileData(q, r, terrain, faction, capital);
+        boolean cityCenter = values.length >= 6 ? Boolean.parseBoolean(values[5]) : capital;
+        int cityId = values.length >= 7 ? Integer.parseInt(values[6]) : -1;
+        String cityName = values.length >= 8 ? decodeField(values[7]) : "";
+        return new MapDefinition.TileData(q, r, terrain, faction, capital, cityCenter, cityId, cityName);
+    }
+
+    private static String escapeField(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        return value
+                .replace("\\", "\\\\")
+                .replace(",", "\\,")
+                .replace("\r", "\\r")
+                .replace("\n", "\\n");
+    }
+
+    private static String decodeField(String value) {
+        if (value == null || value.isEmpty()) {
+            return "";
+        }
+        if (looksLikeLegacyBase64(value)) {
+            try {
+                return new String(java.util.Base64.getDecoder().decode(value), StandardCharsets.UTF_8);
+            } catch (IllegalArgumentException ignored) {
+                // fall through to escaped-text decoding
+            }
+        }
+        StringBuilder builder = new StringBuilder();
+        boolean escaping = false;
+        for (int i = 0; i < value.length(); i++) {
+            char c = value.charAt(i);
+            if (escaping) {
+                if (c == 'n') {
+                    builder.append('\n');
+                } else if (c == 'r') {
+                    builder.append('\r');
+                } else {
+                    builder.append(c);
+                }
+                escaping = false;
+            } else if (c == '\\') {
+                escaping = true;
+            } else {
+                builder.append(c);
+            }
+        }
+        if (escaping) {
+            builder.append('\\');
+        }
+        return builder.toString();
+    }
+
+    private static boolean looksLikeLegacyBase64(String value) {
+        return value.length() >= 8 && value.length() % 4 == 0 && value.matches("[A-Za-z0-9+/=]+");
+    }
+
+    private static String[] splitEscaped(String serialized) {
+        List<String> parts = new ArrayList<>();
+        StringBuilder current = new StringBuilder();
+        boolean escaping = false;
+        for (int i = 0; i < serialized.length(); i++) {
+            char c = serialized.charAt(i);
+            if (escaping) {
+                current.append('\\');
+                current.append(c);
+                escaping = false;
+                continue;
+            }
+            if (c == '\\') {
+                escaping = true;
+                continue;
+            }
+            if (c == ',') {
+                parts.add(current.toString());
+                current.setLength(0);
+            } else {
+                current.append(c);
+            }
+        }
+        if (escaping) {
+            current.append('\\');
+        }
+        parts.add(current.toString());
+        return parts.toArray(new String[0]);
     }
 }

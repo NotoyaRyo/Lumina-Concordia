@@ -83,7 +83,7 @@ public class HexMapModel {
                     MapSample sample = sampleWorldMap(worldMap, getContinentalSampleX(nx, ny), getContinentalSampleY(nx, ny));
                     TerrainType terrain = determineTerrain(row, nx, ny, sample);
                     Faction faction = determineFaction(terrain, nx, ny, sample);
-                    Tile tile = new Tile(axial[0], axial[1], center, terrain, faction, false);
+                    Tile tile = new Tile(axial[0], axial[1], center, terrain, faction, false, false, -1, "");
                     tiles.add(tile);
                     tileIndex.put(tileKey(tile.q, tile.r), tile);
                     minX = Math.min(minX, center.x);
@@ -142,7 +142,10 @@ public class HexMapModel {
                 TerrainType terrain = tileData == null ? TerrainType.WATER : tileData.getTerrain();
                 Faction faction = tileData == null ? null : tileData.getFaction();
                 boolean capital = tileData != null && tileData.isCapital();
-                Tile tile = new Tile(axial[0], axial[1], center, terrain, faction, capital);
+                boolean cityCenter = tileData != null && tileData.isCityCenter();
+                int cityId = tileData == null ? -1 : tileData.getCityId();
+                String cityName = tileData == null ? "" : tileData.getCityName();
+                Tile tile = new Tile(axial[0], axial[1], center, terrain, faction, capital, cityCenter, cityId, cityName);
                 tiles.add(tile);
                 tileIndex.put(tileKey(tile.q, tile.r), tile);
                 minX = Math.min(minX, center.x);
@@ -152,12 +155,78 @@ public class HexMapModel {
             }
         }
         updateMapBounds(minX, maxX, minY, maxY);
+        normalizeCityCenters();
+    }
+
+    private void normalizeCityCenters() {
+        int nextCityId = 1;
+        Set<Integer> assignedCenterIds = new HashSet<>();
+        Map<Integer, Faction> cityFactionById = new HashMap<>();
+        Map<Faction, Tile> capitalByFaction = new HashMap<>();
+        for (Tile tile : tiles) {
+            if (tile.terrain.isPolar()) {
+                clearPoliticalState(tile);
+                continue;
+            }
+            if (tile.capital) {
+                tile.cityCenter = true;
+            }
+            if (!tile.cityCenter) {
+                tile.capital = false;
+                if (tile.cityId < 0 || tile.faction == null) {
+                    clearPoliticalState(tile);
+                }
+                continue;
+            }
+            if (tile.faction == null) {
+                clearPoliticalState(tile);
+                continue;
+            }
+            tile.cityName = tile.cityName == null ? "" : tile.cityName.trim();
+            if (tile.cityId < 0 || assignedCenterIds.contains(tile.cityId)) {
+                tile.cityId = nextCityId++;
+            } else {
+                nextCityId = Math.max(nextCityId, tile.cityId + 1);
+            }
+            assignedCenterIds.add(tile.cityId);
+            cityFactionById.put(tile.cityId, tile.faction);
+            if (tile.capital) {
+                Tile existingCapital = capitalByFaction.putIfAbsent(tile.faction, tile);
+                if (existingCapital != null && existingCapital != tile) {
+                    tile.capital = false;
+                }
+            }
+        }
+
+        for (Tile tile : tiles) {
+            if (tile.cityCenter) {
+                continue;
+            }
+            if (tile.cityId < 0) {
+                clearPoliticalState(tile);
+                continue;
+            }
+            Faction owner = cityFactionById.get(tile.cityId);
+            if (owner == null || tile.faction != owner) {
+                clearPoliticalState(tile);
+            } else {
+                tile.cityName = "";
+            }
+        }
+    }
+
+    private void clearPoliticalState(Tile tile) {
+        tile.faction = null;
+        tile.capital = false;
+        tile.cityCenter = false;
+        tile.cityId = -1;
+        tile.cityName = "";
     }
 
     public MapDefinition createTileSnapshotDefinition(String id, String displayName, boolean official) {
         List<MapDefinition.TileData> tileData = new ArrayList<>();
         for (Tile tile : tiles) {
-            tileData.add(new MapDefinition.TileData(tile.q, tile.r, tile.terrain, tile.faction, tile.capital));
+            tileData.add(new MapDefinition.TileData(tile.q, tile.r, tile.terrain, tile.faction, tile.capital, tile.cityCenter, tile.cityId, tile.cityName));
         }
         return MapDefinition.tileSnapshot(id, displayName, official, config.getMapRows(), config.getMapColsEven(),
                 config.getMapColsOdd(), tileData);
@@ -400,6 +469,7 @@ public class HexMapModel {
             Tile capital = findBestCapitalTile(faction);
             if (capital != null) {
                 capital.capital = true;
+                capital.cityCenter = true;
             }
         }
     }
@@ -407,6 +477,7 @@ public class HexMapModel {
     private void clearFactionCapitals() {
         for (Tile tile : tiles) {
             tile.capital = false;
+            tile.cityCenter = false;
         }
     }
 
@@ -422,13 +493,14 @@ public class HexMapModel {
         clearFactionCapitals();
         assignFactionCapitals();
         refreshEasternMountainBorder();
+        normalizeCityCenters();
     }
 
     private TileState[] snapshotTileStates() {
         TileState[] states = new TileState[tiles.size()];
         for (int i = 0; i < tiles.size(); i++) {
             Tile tile = tiles.get(i);
-            states[i] = new TileState(tile.terrain, tile.faction, tile.capital);
+            states[i] = new TileState(tile.terrain, tile.faction, tile.capital, tile.cityCenter, tile.cityId, tile.cityName);
         }
         return states;
     }
@@ -525,6 +597,9 @@ public class HexMapModel {
             tile.terrain = state.terrain;
             tile.faction = state.faction;
             tile.capital = state.capital;
+            tile.cityCenter = state.cityCenter;
+            tile.cityId = state.cityId;
+            tile.cityName = state.cityName;
         }
     }
 
@@ -595,6 +670,7 @@ public class HexMapModel {
             tile.terrain = TerrainType.WATER;
             tile.faction = null;
             tile.capital = false;
+            tile.cityCenter = false;
         }
     }
 
@@ -631,6 +707,7 @@ public class HexMapModel {
             tile.terrain = TerrainType.WATER;
             tile.faction = null;
             tile.capital = false;
+            tile.cityCenter = false;
         }
     }
 
@@ -643,6 +720,7 @@ public class HexMapModel {
                 tile.terrain = TerrainType.WATER;
                 tile.faction = null;
                 tile.capital = false;
+                tile.cityCenter = false;
             }
         }
 
@@ -1188,6 +1266,7 @@ public class HexMapModel {
             tile.terrain = TerrainType.PLAIN;
             tile.faction = Faction.MARITIME_FEDERATION;
             tile.capital = false;
+            tile.cityCenter = false;
         }
 
         for (Tile tile : islandTiles) {
@@ -1201,6 +1280,7 @@ public class HexMapModel {
                     neighbor.terrain = TerrainType.WATER;
                     neighbor.faction = null;
                     neighbor.capital = false;
+                    neighbor.cityCenter = false;
                 }
                 reservedTiles.add(neighbor);
             }
@@ -2254,14 +2334,20 @@ public class HexMapModel {
         public TerrainType terrain;
         public Faction faction;
         public boolean capital;
+        public boolean cityCenter;
+        public int cityId;
+        public String cityName;
 
-        public Tile(int q, int r, Vector2 center, TerrainType terrain, Faction faction, boolean capital) {
+        public Tile(int q, int r, Vector2 center, TerrainType terrain, Faction faction, boolean capital, boolean cityCenter, int cityId, String cityName) {
             this.q = q;
             this.r = r;
             this.center = center;
             this.terrain = terrain;
             this.faction = faction;
             this.capital = capital;
+            this.cityCenter = cityCenter;
+            this.cityId = cityId;
+            this.cityName = cityName == null ? "" : cityName;
         }
     }
 
@@ -2308,11 +2394,17 @@ public class HexMapModel {
         private final TerrainType terrain;
         private final Faction faction;
         private final boolean capital;
+        private final boolean cityCenter;
+        private final int cityId;
+        private final String cityName;
 
-        private TileState(TerrainType terrain, Faction faction, boolean capital) {
+        private TileState(TerrainType terrain, Faction faction, boolean capital, boolean cityCenter, int cityId, String cityName) {
             this.terrain = terrain;
             this.faction = faction;
             this.capital = capital;
+            this.cityCenter = cityCenter;
+            this.cityId = cityId;
+            this.cityName = cityName == null ? "" : cityName;
         }
     }
 }

@@ -93,7 +93,7 @@ public class HexMapRenderer {
         shapeRenderer.end();
     }
 
-    public void renderTerritoryOverlay(ShapeRenderer shapeRenderer, Faction highlightedFaction) {
+    public void renderTerritoryOverlay(ShapeRenderer shapeRenderer, Faction highlightedFaction, int highlightedCityId) {
         Gdx.gl.glEnable(GL20.GL_BLEND);
         shapeRenderer.begin(ShapeRenderer.ShapeType.Filled);
         float wrapWidth = model.getHorizontalWrapWidth();
@@ -103,14 +103,37 @@ public class HexMapRenderer {
                 if (tile.faction == null) continue;
                 float drawX = tile.center.x + xOffset;
                 Color overlay = new Color(tile.faction.getColor());
-                overlay.a = tile.faction == highlightedFaction ? 0.48f : 0.18f;
+                boolean highlightedCity = highlightedCityId >= 0 && tile.cityId == highlightedCityId;
+                boolean sameFaction = tile.faction == highlightedFaction;
+                boolean cityArea = tile.cityId >= 0;
+                if (highlightedCity) {
+                    overlay.a = sameFaction ? 0.82f : 0.68f;
+                } else if (cityArea) {
+                    overlay.a = sameFaction ? 0.22f : 0.10f;
+                } else {
+                    overlay.a = sameFaction ? 0.32f : 0.12f;
+                }
                 shapeRenderer.setColor(overlay);
                 drawHexagon(shapeRenderer, drawX, tile.center.y);
+                if (highlightedCity) {
+                    Color cityAccent = new Color(tile.faction.getColor());
+                    cityAccent.a = sameFaction ? 1f : 0.86f;
+                    shapeRenderer.setColor(cityAccent);
+                    float size = config.getHexSize() * 0.24f;
+                    shapeRenderer.circle(drawX, tile.center.y, size, 16);
+                }
+                if (tile.cityCenter && !tile.capital) {
+                    Color cityColor = new Color(tile.faction.getColor());
+                    cityColor.a = sameFaction ? 1f : 0.78f;
+                    shapeRenderer.setColor(cityColor);
+                    float size = config.getHexSize() * 0.38f;
+                    shapeRenderer.rect(drawX - size * 0.5f, tile.center.y - size * 0.5f, size, size);
+                }
                 if (tile.capital) {
                     Color capitalColor = new Color(tile.faction.getColor());
-                    capitalColor.a = tile.faction == highlightedFaction ? 1f : 0.85f;
+                    capitalColor.a = sameFaction ? 1f : 0.9f;
                     shapeRenderer.setColor(capitalColor);
-                    shapeRenderer.circle(drawX, tile.center.y, config.getHexSize() * 0.28f, 12);
+                    shapeRenderer.circle(drawX, tile.center.y, config.getHexSize() * 0.31f, 12);
                 }
             }
         }
@@ -125,7 +148,7 @@ public class HexMapRenderer {
             for (HexMapModel.Tile tile : model.getTiles()) {
                 if (selectedQ != null && selectedR != null && tile.q == selectedQ && tile.r == selectedR) {
                     shapeRenderer.setColor(Color.SKY);
-                } else if (tile.capital) {
+                } else if (tile.capital || tile.cityCenter) {
                     shapeRenderer.setColor(tile.faction.getColor());
                 } else if (tile.faction != null) {
                     Color factionBorder = new Color(tile.faction.getColor());
@@ -250,6 +273,8 @@ public class HexMapRenderer {
                 return new Color(0.90f, 0.94f, 1.00f, 1f);
             case MOUNTAIN:
                 return new Color(0.55f, 0.55f, 0.58f, 1f);
+            case MOUNTAIN_RANGE:
+                return new Color(0.35f, 0.33f, 0.40f, 1f);
             case WATER:
                 return new Color(0.22f, 0.42f, 0.82f, 1f);
             case PLAIN:
@@ -273,6 +298,8 @@ public class HexMapRenderer {
                 return "";
             case MOUNTAIN:
                 return "MTN";
+            case MOUNTAIN_RANGE:
+                return "RNG";
             case WATER:
                 return "WTR";
             case ROAD:
@@ -289,6 +316,7 @@ public class HexMapRenderer {
             case FOREST:
             case HILLS:
             case MOUNTAIN:
+            case MOUNTAIN_RANGE:
                 return Color.WHITE;
             case TUNDRA:
             case ANTARCTIC:
